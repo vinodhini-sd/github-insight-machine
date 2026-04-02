@@ -1,0 +1,23 @@
+version: 2
+
+sources:
+  - name: raw
+    database: VINO_GITHUB_INSIGHTS
+    schema: RAW
+    tables:
+      - name: github_events
+        description: "All GitHub public events from GH Archive hourly ingestion"
+        columns:
+          - name: event_id
+            tests:
+              - not_null
+          - name: event_type
+            tests:
+              - not_null
+          - name: repo_name
+            tests:
+              - not_null
+      - name: repo_metadata
+        description: "Repo metadata enriched from GitHub REST API"
+      - name: ingestion_log
+        description: "Tracks which GH Archive hourly files have been ingested"
