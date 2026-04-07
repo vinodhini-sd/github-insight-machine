@@ -22,7 +22,11 @@ SELECT
             THEN 'active_contributor'
         ELSE 'casual'
     END AS contributor_type
+-- NOTE: queries source directly (not staging) for performance —
+-- a single-pass multi-CASE scan is more efficient than UNION ALL across 6 staging models.
 FROM {{ source('raw', 'github_events') }}
 WHERE actor_login NOT LIKE '%[bot]%'
   AND actor_login NOT LIKE '%-bot'
+  -- 90-day window: contributor profiles should reflect current contributors
+  AND created_at >= DATEADD('day', -90, CURRENT_TIMESTAMP())
 GROUP BY actor_id, actor_login

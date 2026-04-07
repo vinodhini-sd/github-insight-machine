@@ -16,4 +16,6 @@ SELECT
 FROM {{ source('raw', 'github_events') }}
 WHERE org_id IS NOT NULL
   AND org_login IS NOT NULL
+  -- 30-day window — prevents unbounded scans as event history grows
+  AND created_at >= DATEADD('day', -30, CURRENT_TIMESTAMP())
 GROUP BY org_id, org_login

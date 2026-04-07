@@ -8,6 +8,8 @@ WITH hourly_activity AS (
         COUNT(DISTINCT actor_id) AS unique_actors,
         COUNT(DISTINCT repo_id) AS unique_repos
     FROM {{ source('raw', 'github_events') }}
+    -- Last 7 days — hourly data accumulates fast
+    WHERE created_at >= DATEADD('day', -7, CURRENT_TIMESTAMP())
     GROUP BY 1, 2
 )
 
