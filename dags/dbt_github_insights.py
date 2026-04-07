@@ -50,7 +50,7 @@ def dbt_github_insights():
             profile_args={
                 "database": "VINO_GITHUB_INSIGHTS",
                 "schema": "RAW",
-                "role": "ACCOUNTADMIN",
+                "role": os.environ.get("SNOWFLAKE_ROLE", "ACCOUNTADMIN"),
             },
         ),
     )

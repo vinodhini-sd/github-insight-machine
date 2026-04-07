@@ -10,9 +10,13 @@ WITH contributor_orgs AS (
         MIN(created_at) AS first_activity_in_org,
         MAX(created_at) AS last_activity_in_org
     FROM {{ source('raw', 'github_events') }}
+    -- NOTE: queries source directly (not int_org_activity) — needs actor+org granularity
+    -- that int_org_activity doesn't provide (it aggregates away actor_id).
     WHERE org_id IS NOT NULL
       AND event_type IN ('PushEvent', 'PullRequestEvent', 'IssuesEvent')
       AND actor_login NOT LIKE '%[bot]%'
+      -- 90-day window: migration signals should reflect recent cross-org activity
+      AND created_at >= DATEADD('day', -90, CURRENT_TIMESTAMP())
     GROUP BY 1, 2, 3
 ),
 

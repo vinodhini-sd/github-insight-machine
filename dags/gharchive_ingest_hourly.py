@@ -10,7 +10,6 @@ from datetime import datetime, timedelta
 
 from airflow.decorators import dag, task
 from airflow.datasets import Dataset
-from airflow.providers.snowflake.operators.snowflake import SnowflakeOperator
 
 # Airflow Dataset: downstream DAGs trigger when this is updated
 GHARCHIVE_RAW_DATASET = Dataset("snowflake://VINO_GITHUB_INSIGHTS.RAW.GITHUB_EVENTS")
@@ -34,28 +33,25 @@ SNOWFLAKE_CONN_ID = "snowflake_default"
 def gharchive_ingest_hourly():
     @task()
     def compute_hour_key(**context):
-        """Compute the GH Archive hour key for the previous hour."""
+        """Compute the GH Archive hour key for the current interval."""
         # data_interval_start is the beginning of the interval this run covers
         logical_date = context["data_interval_start"]
         return logical_date.strftime("%Y-%m-%d-%-H")
 
-    @task()
-    def log_hour_key(hour_key: str):
-        """Log which hour we're ingesting."""
-        print(f"Ingesting GH Archive hour: {hour_key}")
+    @task(outlets=[GHARCHIVE_RAW_DATASET])
+    def ingest_hour(hour_key: str):
+        """Call the Snowflake SP to ingest one hour of GH Archive data."""
+        from airflow.providers.snowflake.hooks.snowflake import SnowflakeHook
+
+        hook = SnowflakeHook(snowflake_conn_id=SNOWFLAKE_CONN_ID)
+        result = hook.run(
+            f"CALL VINO_GITHUB_INSIGHTS.RAW.SP_INGEST_GHARCHIVE_HOUR('{hour_key}')"
+        )
+        print(f"Ingested {hour_key}: {result}")
         return hour_key
 
     hour_key = compute_hour_key()
-    logged = log_hour_key(hour_key)
-
-    ingest = SnowflakeOperator(
-        task_id="call_ingest_sp",
-        snowflake_conn_id=SNOWFLAKE_CONN_ID,
-        sql="CALL VINO_GITHUB_INSIGHTS.RAW.SP_INGEST_GHARCHIVE_HOUR('{{ ti.xcom_pull(task_ids='compute_hour_key') }}')",
-        outlets=[GHARCHIVE_RAW_DATASET],
-    )
-
-    logged >> ingest
+    ingest_hour(hour_key)
 
 
 gharchive_ingest_hourly()

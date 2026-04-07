@@ -22,6 +22,8 @@ SELECT
     CASE WHEN unique_pushers > 1 THEN TRUE ELSE FALSE END AS has_community_contributors
 FROM {{ ref('int_repo_daily_activity') }}
 WHERE activity_score > 0
+  -- Only last 30 days — prevents full table scans as history grows
+  AND activity_date >= DATEADD('day', -30, CURRENT_DATE())
   -- Filter out GitHub internal repos and known bot-heavy repos
   AND owner NOT IN ('github', 'dependabot')
   AND repo_name NOT LIKE '%/.github%'

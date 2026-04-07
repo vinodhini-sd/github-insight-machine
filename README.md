@@ -1,49 +1,127 @@
-Overview
-========
+# github-insight-machine
 
-Welcome to Astronomer! This project was generated after you ran 'astro dev init' using the Astronomer CLI. This readme describes the contents of the project, as well as how to run Apache Airflow on your local machine.
+A real-time GitHub ecosystem intelligence pipeline built on GH Archive, Snowflake, Airflow, and dbt. Ingests all public GitHub events hourly, enriches them with GitHub API metadata, and produces analytics-ready mart tables for trending repos, contributor patterns, community health, and ecosystem signals.
 
-Project Contents
-================
+---
 
-Your Astro project contains the following files and folders:
+## What it does
 
-- dags: This folder contains the Python files for your Airflow DAGs. By default, this directory includes two example DAGs:
-    - `example_dag_basic`: This DAG shows a simple ETL data pipeline example with three TaskFlow API tasks that run daily.
-    - `example_dag_advanced`: This advanced DAG showcases a variety of Airflow features like branching, Jinja templates, task groups and several Airflow operators.
-- Dockerfile: This file contains a versioned Astro Runtime Docker image that provides a differentiated Airflow experience. If you want to execute other commands or overrides at runtime, specify them here.
-- include: This folder contains any additional files that you want to include as part of your project. It is empty by default.
-- packages.txt: Install OS-level packages needed for your project by adding them to this file. It is empty by default.
-- requirements.txt: Install Python packages needed for your project by adding them to this file. It is empty by default.
-- plugins: Add custom or community plugins for your project to this file. It is empty by default.
-- airflow_settings.yaml: Use this local-only file to specify Airflow Connections, Variables, and Pools instead of entering them in the Airflow UI as you develop DAGs in this project.
+- Ingests public GitHub events (stars, pushes, forks, PRs, issues, releases, creates) from [GH Archive](https://www.gharchive.org/) every hour
+- Enriches active repos with metadata from the GitHub REST API: topics, language, description, license, star/fork counts
+- Transforms raw events into mart tables via dbt (staging → intermediate → marts)
+- Surfaces insights on: trending repos, viral velocity candidates, community health, org OSS investment, cross-org contributor migration
 
-Deploy Your Project Locally
-===========================
+---
 
-1. Start Airflow on your local machine by running 'astro dev start'.
+## Architecture
 
-This command will spin up 4 Docker containers on your machine, each for a different Airflow component:
+```
+GH Archive (hourly JSON) 
+    ↓ Airflow DAG: gharchive_ingest_hourly
+    ↓ Snowflake SP: SP_INGEST_GHARCHIVE_HOUR
+RAW.GITHUB_EVENTS
+    ↓ (Airflow Dataset trigger)
+    ├── Airflow DAG: repo_metadata_enrichment → RAW.REPO_METADATA
+    └── Airflow DAG: dbt_github_insights (Cosmos)
+            ↓
+        STAGING (views)      → stg_watch/push/fork/pr/issue/release/create_events
+        INTERMEDIATE (tables) → int_repo_daily_activity, int_contributor_profiles, int_org_activity
+        MARTS (tables)        → 6 mart tables (see below)
+```
 
-- Postgres: Airflow's Metadata Database
-- Webserver: The Airflow component responsible for rendering the Airflow UI
-- Scheduler: The Airflow component responsible for monitoring and triggering tasks
-- Triggerer: The Airflow component responsible for triggering deferred tasks
+---
 
-2. Verify that all 4 Docker containers were created by running 'docker ps'.
+## Mart inventory
 
-Note: Running 'astro dev start' will start your project with the Airflow Webserver exposed at port 8080 and Postgres exposed at port 5432. If you already have either of those ports allocated, you can either [stop your existing Docker containers or change the port](https://docs.astronomer.io/astro/test-and-troubleshoot-locally#ports-are-not-available).
+| Mart | What it answers | Time window |
+|---|---|---|
+| `mart_trending_repos` | Daily ranked repos by composite activity score (stars, pushes, forks, PRs, issues) | Last 30 days |
+| `mart_trending_by_topic` | Trending repos enriched with language, topics, description from GitHub API | Last 30 days |
+| `mart_viral_velocity` | Repos with sudden star acceleration vs their own 7-day baseline — velocity_class: explosive / viral / accelerating | Last 15 days |
+| `mart_new_repo_breakout` | Repos < 30 days old with high early traction — breakout_tier: instant_hit / fast_mover / rising | Last 30 days |
+| `mart_release_momentum` | Projects cutting releases with sustained PR/push activity — project_stage: active_oss / growing / early_release | Last 90 days |
+| `mart_ai_ecosystem` | Trending AI/LLM/MCP/agent repos with week-over-week momentum — momentum: surging / growing / new_to_radar | Last 30 days |
+| `mart_ecosystem_hourly` | Macro GitHub activity by event type — is OSS accelerating? | Last 7 days |
+| `mart_fork_conversion` | Fork-to-PR conversion rate + community health: thriving / growing / fork_graveyard | Last 90 days |
+| `mart_org_scoreboard` | Which orgs are most active in OSS — push ratio, PR ratio, contributors per repo | Last 30 days |
+| `mart_contributor_migration` | Developers active across multiple orgs — talent flow and cross-pollination signals | Last 90 days |
 
-3. Access the Airflow UI for your local Airflow project. To do so, go to http://localhost:8080/ and log in with 'admin' for both your Username and Password.
+---
 
-You should also be able to access your Postgres Database at 'localhost:5432/postgres'.
+## DAGs
 
-Deploy Your Project to Astronomer
-=================================
+| DAG | Schedule | Trigger |
+|---|---|---|
+| `gharchive_ingest_hourly` | `@hourly` | Time-based |
+| `repo_metadata_enrichment` | Dataset-driven | After `gharchive_ingest_hourly` |
+| `dbt_github_insights` | Dataset-driven | After `gharchive_ingest_hourly` |
+| `gharchive_backfill` | Manual only | Triggered with `{"start_date": "YYYY-MM-DD", "end_date": "YYYY-MM-DD"}` |
 
-If you have an Astronomer account, pushing code to a Deployment on Astronomer is simple. For deploying instructions, refer to Astronomer documentation: https://docs.astronomer.io/cloud/deploy-code/
+All DAGs communicate via an Airflow Dataset: `snowflake://VINO_GITHUB_INSIGHTS.RAW.GITHUB_EVENTS`
 
-Contact
-=======
+---
 
-The Astronomer CLI is maintained with love by the Astronomer team. To report a bug or suggest a change, reach out to our support.
+## Local setup
+
+**Prerequisites:** Docker, [Astro CLI](https://docs.astronomer.io/astro/cli/install-cli)
+
+```bash
+# Start Airflow locally
+astro dev start
+
+# UI: http://localhost:8080 (admin/admin)
+```
+
+**Required Airflow connection** (`snowflake_default`):
+
+| Field | Value |
+|---|---|
+| Conn type | Snowflake |
+| Account | `<your-account>` |
+| Login | `<your-user>` |
+| Password | `<your-password>` |
+| Schema | `RAW` |
+| Database | `VINO_GITHUB_INSIGHTS` |
+| Warehouse | `COMPUTE_WH` (or set `SNOWFLAKE_WAREHOUSE`) |
+
+**Required env vars** (set in Airflow or `.env`):
+
+```bash
+SNOWFLAKE_ACCOUNT=...
+SNOWFLAKE_USER=...
+SNOWFLAKE_PASSWORD=...
+SNOWFLAKE_ROLE=ACCOUNTADMIN        # optional, defaults to ACCOUNTADMIN
+SNOWFLAKE_WAREHOUSE=COMPUTE_WH    # optional, defaults to COMPUTE_WH
+```
+
+---
+
+## dbt setup
+
+```bash
+cd dbt/github_insights
+
+# Install deps
+dbt deps
+
+# Compile to verify
+dbt compile
+
+# Run all models
+dbt run
+```
+
+dbt reads credentials from env vars (see `profiles.yml`). No hardcoded credentials.
+
+---
+
+## Snowflake prerequisites
+
+The pipeline expects the following objects in `VINO_GITHUB_INSIGHTS`:
+
+- `RAW.GITHUB_EVENTS` — target table for GH Archive events
+- `RAW.REPO_METADATA` — target table for GitHub API enrichment
+- `RAW.INGESTION_LOG` — tracks which hourly files have been loaded
+- `RAW.SP_INGEST_GHARCHIVE_HOUR(hour_key STRING)` — stored procedure that fetches and loads one GH Archive hour
+- `RAW.SP_ENRICH_REPO_METADATA(batch_size INT)` — stored procedure that enriches top N repos via GitHub REST API
+

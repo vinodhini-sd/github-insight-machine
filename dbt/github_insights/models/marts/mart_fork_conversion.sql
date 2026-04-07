@@ -7,6 +7,8 @@ WITH repo_forks AS (
         COUNT(*) AS fork_count,
         COUNT(DISTINCT actor_id) AS unique_forkers
     FROM {{ ref('stg_fork_events') }}
+    -- 90-day window: community health should reflect recent activity
+    WHERE created_at >= DATEADD('day', -90, CURRENT_TIMESTAMP())
     GROUP BY 1, 2
 ),
 
@@ -16,6 +18,8 @@ repo_prs AS (
         COUNT(*) AS pr_count,
         COUNT(DISTINCT actor_id) AS unique_pr_authors
     FROM {{ ref('stg_pull_request_events') }}
+    -- Match the same 90-day window as forks
+    WHERE created_at >= DATEADD('day', -90, CURRENT_TIMESTAMP())
     GROUP BY 1
 ),
 
