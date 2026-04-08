@@ -15,18 +15,36 @@ st.set_page_config(
 )
 
 # ── Connection ─────────────────────────────────────────────────────────────────
-# Uses PAT auth — inject via cortex secrets at launch:
+# Uses RSA keypair auth (PAT fallback when SFDEVREL_PAT is set).
+# Launch with keypair (default):
+#   SNOWFLAKE_ACCOUNT="<SNOWFLAKE_ACCOUNT>" \
+#   python3 -m streamlit run streamlit_app.py
+# Launch with PAT (when valid):
 #   SNOWFLAKE_ACCOUNT="<SNOWFLAKE_ACCOUNT>" SNOWFLAKE_USER="<SNOWFLAKE_USER>" \
 #   SFDEVREL_PAT="<SFDEVREL_PAT>" python3 -m streamlit run streamlit_app.py
 
+_DEFAULT_KEY = "/Users/vduraisamy/.snowflake/eval_rsa_key.p8"
+
 @st.cache_resource
 def get_conn():
+    pat = os.environ.get("SFDEVREL_PAT", "")
+    if pat:
+        return st.connection(
+            "snowflake",
+            account=os.environ["SNOWFLAKE_ACCOUNT"],
+            user=os.environ["SNOWFLAKE_USER"],
+            authenticator="programmatic_access_token",
+            password=pat,
+            warehouse=os.environ.get("SNOWFLAKE_WAREHOUSE", "COMPUTE_WH"),
+            database="VINO_GITHUB_INSIGHTS",
+            schema="MARTS",
+            role=os.environ.get("SNOWFLAKE_ROLE", "ACCOUNTADMIN"),
+        )
     return st.connection(
         "snowflake",
         account=os.environ["SNOWFLAKE_ACCOUNT"],
-        user=os.environ["SNOWFLAKE_USER"],
-        authenticator="programmatic_access_token",
-        password=os.environ["SFDEVREL_PAT"],
+        user=os.environ.get("SNOWFLAKE_USER", "VINOD"),
+        private_key_path=os.environ.get("SNOWFLAKE_PRIVATE_KEY_PATH", _DEFAULT_KEY),
         warehouse=os.environ.get("SNOWFLAKE_WAREHOUSE", "COMPUTE_WH"),
         database="VINO_GITHUB_INSIGHTS",
         schema="MARTS",
